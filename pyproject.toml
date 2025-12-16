@@ -1,0 +1,35 @@
+[project]
+name = "trename"
+version = "0.1.0"
+description = "文件批量重命名工具 - 支持扫描、重命名和撤销"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+    {name = "HibernalGlow"}
+]
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pyperclip>=1.8.0",
+]
+
+[project.optional-dependencies]
+ui = [
+    "streamlit>=1.30.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "hypothesis>=6.0.0",
+]
+
+[project.scripts]
+trename = "trename.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["trename"]
