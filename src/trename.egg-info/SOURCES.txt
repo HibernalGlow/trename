@@ -1,0 +1,17 @@
+pyproject.toml
+src/trename/__init__.py
+src/trename/__main__.py
+src/trename/app.py
+src/trename/cli.py
+src/trename/clipboard.py
+src/trename/models.py
+src/trename/renamer.py
+src/trename/scanner.py
+src/trename/undo.py
+src/trename/validator.py
+src/trename.egg-info/PKG-INFO
+src/trename.egg-info/SOURCES.txt
+src/trename.egg-info/dependency_links.txt
+src/trename.egg-info/entry_points.txt
+src/trename.egg-info/requires.txt
+src/trename.egg-info/top_level.txt
