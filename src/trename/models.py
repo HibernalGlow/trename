@@ -72,6 +72,8 @@ class ConflictType(str, Enum):
 
     TARGET_EXISTS = "target_exists"  # 目标路径已存在
     DUPLICATE_TARGET = "duplicate_target"  # 多个源映射到同一目标
+    ILLEGAL_CHARS = "illegal_chars"  # 包含非法字符
+    INVALID_EXTENSION = "invalid_extension"  # 扩展名格式错误
 
 
 @dataclass

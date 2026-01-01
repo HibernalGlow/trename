@@ -1,8 +1,9 @@
 """冲突检测器
 
-检测重命名操作中的冲突：目标已存在、重复目标等。
+检测重命名操作中的冲突：目标已存在、重复目标、非法字符等。
 """
 
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -14,6 +15,182 @@ from trename.models import (
     RenameJSON,
     RenameNode,
 )
+
+# Windows 文件名非法字符
+ILLEGAL_CHARS = r'/\:*?"<>|'
+ILLEGAL_CHARS_PATTERN = re.compile(r'[/\\:*?"<>|]')
+
+# 字符替换映射（全角替换）
+CHAR_REPLACEMENT_MAP = {
+    '/': '／',   # 全角斜杠
+    '\\': '＼',  # 全角反斜杠
+    ':': '：',   # 全角冒号
+    '*': '＊',   # 全角星号
+    '?': '？',   # 全角问号
+    '"': '＂',   # 全角双引号
+    '<': '＜',   # 全角小于号
+    '>': '＞',   # 全角大于号
+    '|': '｜',   # 全角竖线
+}
+
+
+def sanitize_filename(name: str, is_dir: bool = False) -> tuple[str, list[str]]:
+    """清理文件名中的非法字符
+    
+    Args:
+        name: 原始文件名
+        is_dir: 是否为目录名
+        
+    Returns:
+        (清理后的文件名, 警告消息列表)
+    """
+    warnings: list[str] = []
+    
+    if not name:
+        return name, warnings
+    
+    # 检测非法字符
+    found_chars = ILLEGAL_CHARS_PATTERN.findall(name)
+    if not found_chars:
+        return name, warnings
+    
+    # 分离文件名和扩展名（仅对文件处理）
+    if not is_dir and '.' in name:
+        # 找到最后一个点的位置
+        last_dot = name.rfind('.')
+        base_name = name[:last_dot]
+        ext = name[last_dot:]  # 包含点
+        
+        # 检查扩展名中是否有非法字符
+        ext_illegal = ILLEGAL_CHARS_PATTERN.findall(ext)
+        if ext_illegal:
+            warnings.append(
+                f"[ERROR] 扩展名 '{ext}' 包含非法字符 {ext_illegal}，"
+                f"请检查文件名格式。扩展名不应包含: {ILLEGAL_CHARS}"
+            )
+            # 扩展名中的非法字符不自动替换，返回原名
+            return name, warnings
+    else:
+        base_name = name
+        ext = ""
+    
+    # 替换基础名中的非法字符
+    sanitized_base = base_name
+    replaced_chars: list[str] = []
+    
+    for char in found_chars:
+        if char in base_name:
+            replacement = CHAR_REPLACEMENT_MAP.get(char, '_')
+            sanitized_base = sanitized_base.replace(char, replacement)
+            replaced_chars.append(f"'{char}' -> '{replacement}'")
+    
+    if replaced_chars:
+        warnings.append(
+            f"[AUTO-FIX] 文件名包含非法字符，已自动替换: {', '.join(replaced_chars)}"
+        )
+    
+    return sanitized_base + ext, warnings
+
+
+def validate_extension_position(name: str) -> list[str]:
+    """验证扩展名位置是否正确
+    
+    规则：禁止在扩展名后面加后缀，必须加在扩展名前面
+    例如：
+      - 错误: "file.txt_backup" (后缀在扩展名后)
+      - 正确: "file_backup.txt" (后缀在扩展名前)
+    
+    Args:
+        name: 文件名
+        
+    Returns:
+        错误消息列表
+    """
+    errors: list[str] = []
+    
+    if not name or '.' not in name:
+        return errors
+    
+    # 常见扩展名列表
+    common_exts = {
+        '.txt', '.json', '.xml', '.html', '.htm', '.css', '.js', '.ts',
+        '.py', '.java', '.cpp', '.c', '.h', '.hpp', '.cs', '.go', '.rs',
+        '.md', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+        '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.avif', '.svg',
+        '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav', '.flac',
+        '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2',
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.exe', '.dll', '.so', '.dylib', '.bin',
+        '.log', '.bak', '.tmp', '.cache',
+    }
+    
+    # 找到所有点的位置
+    parts = name.split('.')
+    if len(parts) < 2:
+        return errors
+    
+    # 检查是否有扩展名后跟非扩展名内容
+    # 例如: "file.txt_backup" -> parts = ['file', 'txt_backup']
+    for i, part in enumerate(parts[1:], 1):
+        # 检查这个部分是否像 "ext_suffix" 格式
+        if '_' in part or '-' in part:
+            # 分离可能的扩展名和后缀
+            potential_ext = '.' + part.split('_')[0].split('-')[0]
+            if potential_ext.lower() in common_exts:
+                errors.append(
+                    f"[ERROR] 检测到扩展名后有后缀: '{name}'\n"
+                    f"  问题: 扩展名 '{potential_ext}' 后面不应添加后缀\n"
+                    f"  建议: 将后缀移到扩展名前面\n"
+                    f"  示例: 'file{part.replace(potential_ext[1:], '')}{potential_ext}' 而不是 'file{potential_ext}{part.replace(potential_ext[1:], '')}'"
+                )
+    
+    return errors
+
+
+def validate_target_name(tgt: str, src: str, is_dir: bool = False) -> tuple[str, list[str]]:
+    """验证并清理目标文件名
+    
+    执行以下检查和处理：
+    1. 非法字符检测和自动替换
+    2. 扩展名位置验证
+    3. 保持原扩展名（对于文件）
+    
+    Args:
+        tgt: 目标文件名
+        src: 源文件名（用于获取原扩展名）
+        is_dir: 是否为目录
+        
+    Returns:
+        (处理后的目标名, 消息列表)
+    """
+    messages: list[str] = []
+    
+    if not tgt:
+        return tgt, messages
+    
+    # 1. 清理非法字符
+    sanitized, char_warnings = sanitize_filename(tgt, is_dir)
+    messages.extend(char_warnings)
+    
+    # 如果有扩展名错误，直接返回
+    if any('[ERROR]' in w for w in char_warnings):
+        return tgt, messages
+    
+    # 2. 验证扩展名位置（仅对文件）
+    if not is_dir:
+        ext_errors = validate_extension_position(sanitized)
+        messages.extend(ext_errors)
+        
+        # 3. 检查扩展名是否与源文件一致
+        if '.' in src and '.' in sanitized:
+            src_ext = src[src.rfind('.'):].lower()
+            tgt_ext = sanitized[sanitized.rfind('.'):].lower()
+            if src_ext != tgt_ext:
+                messages.append(
+                    f"[WARNING] 扩展名变更: '{src_ext}' -> '{tgt_ext}'，请确认是否正确"
+                )
+    
+    return sanitized, messages
 
 
 class ConflictValidator:
@@ -62,7 +239,22 @@ class ConflictValidator:
         if isinstance(node, FileNode):
             src_path = parent_path / node.src
             if node.is_ready:
-                tgt_path = parent_path / node.tgt
+                # 验证目标文件名
+                sanitized_tgt, messages = validate_target_name(node.tgt, node.src, is_dir=False)
+                
+                # 处理验证消息
+                for msg in messages:
+                    if '[ERROR]' in msg:
+                        conflicts.append(
+                            Conflict(
+                                type=ConflictType.ILLEGAL_CHARS if '非法字符' in msg else ConflictType.INVALID_EXTENSION,
+                                src_path=src_path,
+                                tgt_path=parent_path / node.tgt,
+                                message=msg,
+                            )
+                        )
+                
+                tgt_path = parent_path / sanitized_tgt
                 # 检查目标是否已存在
                 if self._check_target_exists(src_path, tgt_path):
                     conflicts.append(
@@ -81,7 +273,22 @@ class ConflictValidator:
             current_path = src_path  # 用于子节点的路径计算
 
             if node.is_ready:
-                tgt_path = parent_path / node.tgt_dir
+                # 验证目标目录名
+                sanitized_tgt, messages = validate_target_name(node.tgt_dir, node.src_dir, is_dir=True)
+                
+                # 处理验证消息
+                for msg in messages:
+                    if '[ERROR]' in msg:
+                        conflicts.append(
+                            Conflict(
+                                type=ConflictType.ILLEGAL_CHARS,
+                                src_path=src_path,
+                                tgt_path=parent_path / node.tgt_dir,
+                                message=msg,
+                            )
+                        )
+                
+                tgt_path = parent_path / sanitized_tgt
                 # 检查目标是否已存在
                 if self._check_target_exists(src_path, tgt_path):
                     conflicts.append(
@@ -225,3 +432,46 @@ class ConflictValidator:
             collect_operations(node, base_path)
 
         return operations, conflicts
+
+
+def preprocess_rename_json(rename_json: RenameJSON) -> tuple[RenameJSON, list[str]]:
+    """预处理 RenameJSON，自动清理非法字符
+    
+    在验证前调用此函数，可以自动修复可修复的问题。
+    
+    Args:
+        rename_json: 原始 RenameJSON
+        
+    Returns:
+        (处理后的 RenameJSON, 处理消息列表)
+    """
+    messages: list[str] = []
+    
+    def process_node(node: RenameNode) -> RenameNode:
+        if isinstance(node, FileNode):
+            if node.tgt:
+                sanitized, node_msgs = sanitize_filename(node.tgt, is_dir=False)
+                messages.extend(node_msgs)
+                if sanitized != node.tgt:
+                    return FileNode(src=node.src, tgt=sanitized)
+            return node
+            
+        elif isinstance(node, DirNode):
+            new_tgt_dir = node.tgt_dir
+            if node.tgt_dir:
+                sanitized, node_msgs = sanitize_filename(node.tgt_dir, is_dir=True)
+                messages.extend(node_msgs)
+                if sanitized != node.tgt_dir:
+                    new_tgt_dir = sanitized
+            
+            new_children = [process_node(child) for child in node.children]
+            return DirNode(
+                src_dir=node.src_dir,
+                tgt_dir=new_tgt_dir,
+                children=new_children
+            )
+        
+        return node
+    
+    new_root = [process_node(node) for node in rename_json.root]
+    return RenameJSON(root=new_root), messages
