@@ -54,7 +54,14 @@ class FileRenamer:
         Returns:
             重命名结果
         """
+        from trename.validator import preprocess_rename_json
+        
         base_path = Path(base_path).resolve()
+        
+        # 预处理：自动修复非法字符（如 : -> ：）
+        rename_json, preprocess_messages = preprocess_rename_json(rename_json)
+        for msg in preprocess_messages:
+            logger.info(msg)
 
         # 获取有效操作和冲突
         operations, conflicts = self.validator.get_valid_operations(
