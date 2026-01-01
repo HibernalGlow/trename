@@ -46,6 +46,11 @@ def scan(
         Optional[str],
         typer.Option("-e", "--exclude", help="排除的扩展名，逗号分隔（如 .json,.txt）"),
     ] = ".json,.txt,.html,.htm,.md,.log",
+    exclude_pattern: Annotated[
+        Optional[str],
+        typer.Option("-x", "--exclude-pattern", 
+                     help="排除的文件名模式，逗号分隔。预设: processed (已处理格式), numbered (编号格式)；或自定义正则"),
+    ] = None,
     split: Annotated[
         int,
         typer.Option("-s", "--split", help="分段行数（0=不分段，默认1000）"),
@@ -67,10 +72,16 @@ def scan(
                 for ext in exclude.split(",")
                 if ext.strip()
             }
+        
+        # 解析排除模式
+        exclude_patterns: list[str] = []
+        if exclude_pattern:
+            exclude_patterns = [p.strip() for p in exclude_pattern.split(",") if p.strip()]
 
         scanner = FileScanner(
             ignore_hidden=not include_hidden,
             exclude_exts=exclude_exts,
+            exclude_patterns=exclude_patterns,
         )
 
         # 扫描所有目录并合并

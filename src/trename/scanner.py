@@ -5,6 +5,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from trename.models import DirNode, FileNode, RenameJSON, RenameNode
@@ -14,6 +15,12 @@ logger = logging.getLogger(__name__)
 # 默认排除的扩展名
 DEFAULT_EXCLUDE_EXTS = {".json", ".txt", ".html", ".htm", ".md", ".log"}
 
+# 预定义的排除模式
+PRESET_PATTERNS = {
+    "processed": r"\([^)]+\s*·\s*[^)]+\)",  # 匹配 (xx · xx) 格式
+    "numbered": r"^\d+\.\s",                 # 匹配 "123. " 开头
+}
+
 
 class FileScanner:
     """文件扫描器 - 扫描目录生成 RenameJSON"""
@@ -22,15 +29,29 @@ class FileScanner:
         self,
         ignore_hidden: bool = True,
         exclude_exts: set[str] | None = None,
+        exclude_patterns: list[str] | None = None,
     ):
         """初始化扫描器
 
         Args:
             ignore_hidden: 是否忽略隐藏文件/目录（以 . 开头）
             exclude_exts: 要排除的文件扩展名集合（如 {".json", ".txt"}）
+            exclude_patterns: 要排除的文件名正则模式列表
+                             支持预设: "processed" (已处理格式), "numbered" (编号格式)
         """
         self.ignore_hidden = ignore_hidden
         self.exclude_exts = exclude_exts if exclude_exts is not None else set()
+        
+        # 编译排除模式
+        self.exclude_regexes: list[re.Pattern] = []
+        if exclude_patterns:
+            for pattern in exclude_patterns:
+                # 支持预设模式名
+                actual_pattern = PRESET_PATTERNS.get(pattern, pattern)
+                try:
+                    self.exclude_regexes.append(re.compile(actual_pattern))
+                except re.error as e:
+                    logger.warning(f"无效的正则模式 '{pattern}': {e}")
 
     def scan(self, root_path: Path) -> RenameJSON:
         """扫描目录，返回 RenameJSON 结构
@@ -98,6 +119,10 @@ class FileScanner:
             # 跳过隐藏文件
             if self.ignore_hidden and item.name.startswith("."):
                 continue
+            
+            # 检查排除模式
+            if self._should_exclude(item.name):
+                continue
 
             try:
                 if item.is_dir():
@@ -113,6 +138,20 @@ class FileScanner:
                 logger.warning(f"无法访问 {item}: {e}")
 
         return nodes
+
+    def _should_exclude(self, name: str) -> bool:
+        """检查文件名是否应该被排除
+        
+        Args:
+            name: 文件/目录名
+            
+        Returns:
+            是否应该排除
+        """
+        for regex in self.exclude_regexes:
+            if regex.search(name):
+                return True
+        return False
 
     def _scan_dir(self, dir_path: Path) -> DirNode:
         """扫描单个目录
