@@ -131,17 +131,22 @@ def validate_extension_position(name: str) -> list[str]:
     
     # 检查是否有扩展名后跟非扩展名内容
     # 例如: "file.txt_backup" -> parts = ['file', 'txt_backup']
+    # 例如: "file.txt[backup]" -> parts = ['file', 'txt[backup]']
     for i, part in enumerate(parts[1:], 1):
         # 检查这个部分是否像 "ext_suffix" 格式
-        if '_' in part or '-' in part:
-            # 分离可能的扩展名和后缀
-            potential_ext = '.' + part.split('_')[0].split('-')[0]
+        # 支持的分隔符: _ - [ ( 以及空格后跟任何内容
+        # 例如: "zip [蠢沫沫]" 中的 "zip" 是扩展名，" [蠢沫沫]" 是后缀
+        suffix_match = re.match(r'^([a-zA-Z0-9]+)([\[_\-\( ].+)$', part)
+        if suffix_match:
+            ext_part = suffix_match.group(1)
+            suffix_part = suffix_match.group(2)
+            potential_ext = '.' + ext_part
             if potential_ext.lower() in common_exts:
                 errors.append(
                     f"[ERROR] 检测到扩展名后有后缀: '{name}'\n"
-                    f"  问题: 扩展名 '{potential_ext}' 后面不应添加后缀\n"
+                    f"  问题: 扩展名 '{potential_ext}' 后面不应添加后缀 '{suffix_part.strip()}'\n"
                     f"  建议: 将后缀移到扩展名前面\n"
-                    f"  示例: 'file{part.replace(potential_ext[1:], '')}{potential_ext}' 而不是 'file{potential_ext}{part.replace(potential_ext[1:], '')}'"
+                    f"  示例: 'file{suffix_part}{potential_ext}' 而不是 'file{potential_ext}{suffix_part}'"
                 )
     
     return errors
